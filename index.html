@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Multiplayer Snake Game</title>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <style>
+    body { background: #1a1a24; color: #fff; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+    #menu { margin-bottom: 20px; }
+    button { padding: 10px 20px; font-size: 16px; cursor: pointer; margin: 5px; border-radius: 5px; border: none; background: #00adb5; color: #fff; }
+    button:hover { background: #008c93; }
+    input { padding: 10px; font-size: 16px; width: 220px; border-radius: 5px; border: 1px solid #555; }
+    canvas { background: #222831; border: 3px solid #393e46; display: block; margin: 20px auto; }
+    .status-box { font-size: 18px; margin-top: 10px; color: #00fff5; }
+  </style>
+</head>
+<body>
+
+  <h1>Multiplayer Snake (Up to 3 Players)</h1>
+
+  <div id="menu">
+    <button onclick="startSinglePlayer()">Play Single Player</button>
+    <button onclick="showMultiplayerOptions()">Multiplayer</button>
+  </div>
+
+  <div id="mp-menu" style="display:none;">
+    <button onclick="createRoom()">Create New Room</button>
+    <button onclick="showJoinInput()">Join Room</button>
+  </div>
+
+  <div id="join-section" style="display:none;">
+    <p>Please get the code from your friend or enter server URL:</p>
+    <input type="text" id="serverUrl" placeholder="Server URL (Default: http://localhost:3000)" value="http://localhost:3000"><br><br>
+    <input type="text" id="roomCodeInput" placeholder="Enter 5-character Code"><br><br>
+    <button onclick="joinRoom()">Connect & Join</button>
+  </div>
+
+  <div class="status-box" id="status"></div>
+
+  <canvas id="gameCanvas" width="600" height="600"></canvas>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const GRID_SIZE = 20;
+    const TILE_COUNT = 30; // 600px / 20px grid = 30 tiles
+
+    let socket = null;
+    let mode = 'SINGLE'; // SINGLE or MULTI
+    let playerNum = 1;
+
+    // Single player snake state
+    let singleSnake = [{ x: 10, y: 10 }, { x: 9, y: 10 }];
+    let singleDir = 'RIGHT';
+    let food = { x: 15, y: 15 };
+    let singleGameInterval = null;
+
+    const PLAYER_COLORS = { 1: '#00fff5', 2: '#ff2e63', 3: '#ffe227' };
+
+    function showMultiplayerOptions() {
+      document.getElementById('mp-menu').style.display = 'block';
+    }
+
+    function showJoinInput() {
+      document.getElementById('join-section').style.display = 'block';
+    }
+
+    function connectSocket(url) {
+      if (!socket) {
+        socket = io(url || 'http://localhost:3000');
+        
+        socket.on('roomCreated', (data) => {
+          playerNum = data.playerNum;
+          document.getElementById('status').innerText = 
+            `Room Created! Share Code: ${data.roomCode} (Waiting for friends...)`;
+        });
+
+        socket.on('roomJoined', (data) => {
+          playerNum = data.playerNum;
+          document.getElementById('status').innerText = 
+            `Connected to Room: ${data.roomCode} | You are Player ${playerNum}`;
+        });
+
+        socket.on('updateGameState', (roomState) => {
+          renderMultiplayer(roomState);
+        });
+
+        socket.on('errorMsg', (msg) => {
+          alert(msg);
+        });
+      }
+    }
+
+    function createRoom() {
+      mode = 'MULTI';
+      const url = document.getElementById('serverUrl').value;
+      connectSocket(url);
+      socket.emit('createRoom');
+    }
+
+    function joinRoom() {
+      mode = 'MULTI';
+      const url = document.getElementById('serverUrl').value;
+      const code = document.getElementById('roomCodeInput').value;
+      if (!code) return alert('Please enter room code');
+      connectSocket(url);
+      socket.emit('joinRoom', code);
+    }
+
+    // Controls
+    document.addEventListener('keydown', (e) => {
+      let dir = null;
+      if (e.key === 'ArrowUp' || e.key === 'w') dir = 'UP';
+      if (e.key === 'ArrowDown' || e.key === 's') dir = 'DOWN';
+      if (e.key === 'ArrowLeft' || e.key === 'a') dir = 'LEFT';
+      if (e.key === 'ArrowRight' || e.key === 'd') dir = 'RIGHT';
+
+      if (!dir) return;
+
+      if (mode === 'SINGLE') {
+        singleDir = dir;
+      } else if (mode === 'MULTI' && socket) {
+        socket.emit('playerMove', dir);
+      }
+    });
+
+    // Single Player Logic
+    function startSinglePlayer() {
+      mode = 'SINGLE';
+      clearInterval(singleGameInterval);
+      singleSnake = [{ x: 10, y: 10 }, { x: 9, y: 10 }];
+      singleDir = 'RIGHT';
+      document.getElementById('status').innerText = 'Single Player Mode Started';
+      singleGameInterval = setInterval(updateSinglePlayer, 100);
+    }
+
+    function updateSinglePlayer() {
+      let head = { ...singleSnake[0] };
+      if (singleDir === 'UP') head.y--;
+      if (singleDir === 'DOWN') head.y++;
+      if (singleDir === 'LEFT') head.x--;
+      if (singleDir === 'RIGHT') head.x++;
+
+      // Collision checks
+      if (head.x < 0 || head.x >= TILE_COUNT || head.y < 0 || head.y >= TILE_COUNT) {
+        alert('Game Over!');
+        clearInterval(singleGameInterval);
+        return;
+      }
+
+      singleSnake.unshift(head);
+      if (head.x === food.x && head.y === food.y) {
+        food = { Math.floor(Math.random() * TILE_COUNT), y: Math.floor(Math.random() * TILE_COUNT) };
+      } else {
+        singleSnake.pop();
+      }
+
+      // Render Single Player
+      ctx.fillStyle = '#222831';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#ff2e63';
+      ctx.fillRect(food.x * GRID_SIZE, food.y * GRID_SIZE, GRID_SIZE - 2, GRID_SIZE - 2);
+
+      ctx.fillStyle = '#00fff5';
+      singleSnake.forEach(part => {
+        ctx.fillRect(part.x * GRID_SIZE, part.y * GRID_SIZE, GRID_SIZE - 2, GRID_SIZE - 2);
+      });
+    }
+
+    // Render Multiplayer Frame
+    function renderMultiplayer(room) {
+      ctx.fillStyle = '#222831';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Render Food
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(room.food.x * GRID_SIZE, room.food.y * GRID_SIZE, GRID_SIZE - 2, GRID_SIZE - 2);
+
+      // Render all connected player snakes
+      Object.values(room.players).forEach(p => {
+        ctx.fillStyle = PLAYER_COLORS[p.playerNum] || '#00fff5';
+        p.body.forEach(part => {
+          ctx.fillRect(part.x * GRID_SIZE, part.y * GRID_SIZE, GRID_SIZE - 2, GRID_SIZE - 2);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
